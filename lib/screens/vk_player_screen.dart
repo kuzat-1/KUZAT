@@ -18,7 +18,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   bool _loading = true;
   String? _error;
   bool _fullscreen = false;
-  double _speed = 1;
+  double _speedValue = 1;
   String? _quality;
 
   @override
@@ -41,12 +41,11 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
       final result = _result ?? await VkService.resolve(widget.url);
       final qualities = result.qualities;
       if (qualities.isEmpty) throw Exception('Нет доступного потока');
-
       final selected = quality ?? _quality ?? _bestQuality(qualities);
       final url = qualities[selected] ?? qualities.values.first;
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
-      await controller.setPlaybackSpeed(_speed);
+      await controller.setPlaybackSpeed(_speedValue);
       if (resume != null && resume > Duration.zero && resume < controller.value.duration) {
         await controller.seekTo(resume);
       }
@@ -125,8 +124,8 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     if (mounted) Navigator.pop(context);
   }
 
-  Future<void> _speed(double value) async {
-    _speed = value;
+  Future<void> _setSpeed(double value) async {
+    _speedValue = value;
     await _controller?.setPlaybackSpeed(value);
     if (mounted) Navigator.pop(context);
     if (mounted) setState(() {});
@@ -145,17 +144,15 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     final result = _result;
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _fullscreen
-          ? null
-          : AppBar(
-              backgroundColor: Colors.black,
-              foregroundColor: Colors.white,
-              title: const Text('VK Видео', style: TextStyle(fontWeight: FontWeight.w700)),
-              actions: [
-                IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)),
-                IconButton(onPressed: _fullscreenToggle, icon: const Icon(Icons.fullscreen_rounded)),
-              ],
-            ),
+      appBar: _fullscreen ? null : AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('VK Видео', style: TextStyle(fontWeight: FontWeight.w700)),
+        actions: [
+          IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)),
+          IconButton(onPressed: _fullscreenToggle, icon: const Icon(Icons.fullscreen_rounded)),
+        ],
+      ),
       body: SafeArea(
         top: !_fullscreen,
         bottom: !_fullscreen,
@@ -203,10 +200,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
         aspectRatio: c.value.aspectRatio,
         child: Stack(
           alignment: Alignment.center,
-          children: [
-            VideoPlayer(c),
-            if (c.value.isBuffering) const CircularProgressIndicator(),
-          ],
+          children: [VideoPlayer(c), if (c.value.isBuffering) const CircularProgressIndicator()],
         ),
       ),
     );
@@ -230,7 +224,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
                 Text('${_time(value.position)} / ${_time(value.duration)}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
                 const Spacer(),
                 IconButton(onPressed: () => c.setVolume(value.volume == 0 ? 1 : 0), icon: Icon(value.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
-                IconButton(onPressed: _showSpeed, icon: Text('${_speed}x', style: const TextStyle(fontSize: 12))),
+                IconButton(onPressed: _showSpeed, icon: Text('${_speedValue}x', style: const TextStyle(fontSize: 12))),
                 IconButton(onPressed: _showQuality, icon: const Icon(Icons.high_quality_rounded)),
                 IconButton(onPressed: _fullscreenToggle, icon: const Icon(Icons.fullscreen_rounded)),
               ],
@@ -244,8 +238,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   void _showQuality() {
     final result = _result;
     if (result == null) return;
-    final keys = result.qualities.keys.toList()
-      ..sort((a, b) => (int.tryParse(b) ?? 0).compareTo(int.tryParse(a) ?? 0));
+    final keys = result.qualities.keys.toList()..sort((a, b) => (int.tryParse(b) ?? 0).compareTo(int.tryParse(a) ?? 0));
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF171717),
@@ -261,7 +254,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
               for (final key in keys)
                 ListTile(
                   leading: const Icon(Icons.hd_outlined),
-                  title: Text(key == 'src1' ? 'Источник' : '${key}p'),
+                  title: Text(key.startsWith('src') ? 'Источник' : '${key}p'),
                   trailing: key == _quality ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null,
                   onTap: () => _changeQuality(key),
                 ),
@@ -285,14 +278,12 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
             for (final value in values)
               ListTile(
                 title: Text('${value}x'),
-                trailing: value == _speed ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null,
-                onTap: () => _speedValue(value),
+                trailing: value == _speedValue ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null,
+                onTap: () => _setSpeed(value),
               ),
           ],
         ),
       ),
     );
   }
-
-  Future<void> _speedValue(double value) => _speed(value);
 }
