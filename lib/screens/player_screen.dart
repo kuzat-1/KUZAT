@@ -82,7 +82,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         try {
           _tracks = await controller.getVideoTracks();
           _tracks = [..._tracks]..sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
-          final selected = _tracks.where((t) => t.isSelected).firstOrNull;
+          VideoTrack? selected;
+          for (final track in _tracks) {
+            if (track.isSelected) {
+              selected = track;
+              break;
+            }
+          }
           if (selected != null) _qualityLabel = _trackLabel(selected);
         } catch (_) {
           _tracks = const [];
@@ -302,43 +308,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
             Row(
               children: [
+                IconButton(onPressed: () => _seekBy(const Duration(seconds: -10)), icon: const Icon(Icons.replay_10_rounded)),
                 IconButton(
-                  tooltip: 'Назад 10 секунд',
-                  onPressed: () => _seekBy(const Duration(seconds: -10)),
-                  icon: const Icon(Icons.replay_10_rounded),
-                ),
-                IconButton(
-                  tooltip: value.isPlaying ? 'Пауза' : 'Воспроизвести',
                   onPressed: () => value.isPlaying ? video.pause() : video.play(),
                   icon: Icon(value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
                 ),
-                IconButton(
-                  tooltip: 'Вперёд 10 секунд',
-                  onPressed: () => _seekBy(const Duration(seconds: 10)),
-                  icon: const Icon(Icons.forward_10_rounded),
-                ),
+                IconButton(onPressed: () => _seekBy(const Duration(seconds: 10)), icon: const Icon(Icons.forward_10_rounded)),
                 Text('${_format(value.position)} / ${_format(value.duration)}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
                 const Spacer(),
-                IconButton(
-                  tooltip: value.volume == 0 ? 'Включить звук' : 'Выключить звук',
-                  onPressed: () => video.setVolume(value.volume == 0 ? 1 : 0),
-                  icon: Icon(value.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Скорость',
-                  onPressed: _showSpeed,
-                  icon: const Icon(Icons.speed_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Качество',
-                  onPressed: _showQuality,
-                  icon: const Icon(Icons.high_quality_rounded),
-                ),
-                IconButton(
-                  tooltip: 'Полный экран',
-                  onPressed: _toggleFullscreen,
-                  icon: const Icon(Icons.fullscreen_rounded),
-                ),
+                IconButton(onPressed: () => video.setVolume(value.volume == 0 ? 1 : 0), icon: Icon(value.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
+                IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)),
+                IconButton(onPressed: _showQuality, icon: const Icon(Icons.high_quality_rounded)),
+                IconButton(onPressed: _toggleFullscreen, icon: const Icon(Icons.fullscreen_rounded)),
               ],
             ),
           ],
@@ -363,33 +344,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   builder: (context, snapshot) {
                     final position = snapshot.data ?? Duration.zero;
                     final max = duration <= 0 ? 1.0 : duration;
-                    return Slider(
-                      value: position.inMilliseconds.clamp(0, duration > 0 ? duration * 1000 : 1000) / 1000,
-                      max: max,
-                      onChanged: (seconds) => controller.seekTo(seconds: seconds),
-                    );
+                    final current = (position.inMilliseconds / 1000).clamp(0.0, max).toDouble();
+                    return Slider(value: current, max: max, onChanged: (seconds) => controller.seekTo(seconds: seconds));
                   },
                 ),
                 Row(
                   children: [
                     IconButton(
-                      tooltip: 'Назад 10 секунд',
                       onPressed: () async {
                         final p = await controller.currentTime;
-                        await controller.seekTo(seconds: (p - 10).clamp(0, duration));
+                        await controller.seekTo(seconds: (p - 10).clamp(0.0, duration).toDouble());
                       },
                       icon: const Icon(Icons.replay_10_rounded),
                     ),
                     IconButton(
-                      tooltip: 'Воспроизведение',
                       onPressed: () => value.playerState == PlayerState.playing ? controller.pauseVideo() : controller.playVideo(),
                       icon: Icon(value.playerState == PlayerState.playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
                     ),
                     IconButton(
-                      tooltip: 'Вперёд 10 секунд',
                       onPressed: () async {
                         final p = await controller.currentTime;
-                        await controller.seekTo(seconds: (p + 10).clamp(0, duration));
+                        await controller.seekTo(seconds: (p + 10).clamp(0.0, duration).toDouble());
                       },
                       icon: const Icon(Icons.forward_10_rounded),
                     ),
@@ -446,35 +421,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
       builder: (_) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Качество', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              if (!canSelect)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Text('Источник не предоставляет отдельные варианты качества.', style: TextStyle(color: Colors.white60)),
-                )
-              else ...[
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Качество', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            if (!canSelect)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('Источник не предоставляет отдельные варианты качества.', style: TextStyle(color: Colors.white60)),
+              )
+            else ...[
+              ListTile(
+                leading: const Icon(Icons.auto_awesome),
+                title: const Text('Авто'),
+                trailing: _qualityLabel == 'Авто' ? const Icon(Icons.check_rounded) : null,
+                onTap: () => _selectTrack(null),
+              ),
+              for (final track in _tracks)
                 ListTile(
-                  leading: const Icon(Icons.auto_awesome),
-                  title: const Text('Авто'),
-                  trailing: _qualityLabel == 'Авто' ? const Icon(Icons.check_rounded) : null,
-                  onTap: () => _selectTrack(null),
+                  leading: const Icon(Icons.hd_outlined),
+                  title: Text(_trackLabel(track)),
+                  subtitle: track.bitrate == null ? null : Text('${(track.bitrate! / 1000000).toStringAsFixed(1)} Mbps'),
+                  trailing: _qualityLabel == _trackLabel(track) ? const Icon(Icons.check_rounded) : null,
+                  onTap: () => _selectTrack(track),
                 ),
-                for (final track in _tracks)
-                  ListTile(
-                    leading: const Icon(Icons.hd_outlined),
-                    title: Text(_trackLabel(track)),
-                    subtitle: track.bitrate == null ? null : Text('${(track.bitrate! / 1000000).toStringAsFixed(1)} Mbps'),
-                    trailing: _qualityLabel == _trackLabel(track) ? const Icon(Icons.check_rounded) : null,
-                    onTap: () => _selectTrack(track),
-                  ),
-              ],
             ],
-          ),
+          ]),
         ),
       ),
     );
@@ -488,20 +459,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       builder: (_) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Скорость', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 8),
-              for (final speed in speeds)
-                ListTile(
-                  title: Text('${speed}x'),
-                  trailing: _speed == speed ? const Icon(Icons.check_rounded) : null,
-                  onTap: () => _setSpeed(speed),
-                ),
-            ],
-          ),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Скорость', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            for (final speed in speeds)
+              ListTile(
+                title: Text('${speed}x'),
+                trailing: _speed == speed ? const Icon(Icons.check_rounded) : null,
+                onTap: () => _setSpeed(speed),
+              ),
+          ]),
         ),
       ),
     );
