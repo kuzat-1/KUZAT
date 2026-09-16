@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/playback_preferences.dart';
 import '../services/playback_store.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -11,10 +11,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const _autoplayKey = 'kuzat_autoplay_v1';
-  static const _qualityKey = 'kuzat_default_quality_v1';
-  bool _autoplay = true;
-  String _quality = 'Авто';
+  PlaybackPreferences _prefs = PlaybackPreferences.defaults();
 
   @override
   void initState() {
@@ -23,24 +20,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _autoplay = prefs.getBool(_autoplayKey) ?? true;
-      _quality = prefs.getString(_qualityKey) ?? 'Авто';
-    });
+    final prefs = await PlaybackPreferences.load();
+    if (mounted) setState(() => _prefs = prefs);
   }
 
   Future<void> _setAutoplay(bool value) async {
-    setState(() => _autoplay = value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_autoplayKey, value);
+    final next = _prefs.copyWith(autoplay: value);
+    await next.save();
+    if (mounted) setState(() => _prefs = next);
   }
 
   Future<void> _setQuality(String value) async {
-    setState(() => _quality = value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_qualityKey, value);
+    final next = _prefs.copyWith(defaultQuality: value);
+    await next.save();
+    if (mounted) setState(() => _prefs = next);
   }
 
   @override
@@ -57,35 +50,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 SwitchListTile.adaptive(
                   title: const Text('Автовоспроизведение'),
                   subtitle: const Text('Запускать видео сразу после загрузки'),
-                  value: _autoplay,
+                  value: _prefs.autoplay,
                   onChanged: _setAutoplay,
                 ),
                 const Divider(height: 1),
                 ListTile(
                   title: const Text('Качество по умолчанию'),
-                  subtitle: Text(_quality),
+                  subtitle: Text(_prefs.defaultQuality),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => showModalBottomSheet<void>(
-                    context: context,
-                    backgroundColor: const Color(0xFF171717),
-                    builder: (_) => SafeArea(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Padding(padding: EdgeInsets.all(18), child: Align(alignment: Alignment.centerLeft, child: Text('Качество по умолчанию', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)))),
-                          for (final value in const ['Авто', '1080p', '720p', '480p', '360p'])
-                            ListTile(
-                              title: Text(value),
-                              trailing: value == _quality ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null,
-                              onTap: () {
-                                _setQuality(value);
-                                Navigator.pop(context);
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  onTap: _showQuality,
                 ),
               ],
             ),
@@ -115,6 +88,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _showQuality() async {
+    const values = ['Авто', '1080p', '720p', '480p', '360p'];
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF171717),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(18),
+              child: Align(alignment: Alignment.centerLeft, child: Text('Качество по умолчанию', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700))),
+            ),
+            for (final item in values)
+              ListTile(
+                title: Text(item),
+                trailing: item == _prefs.defaultQuality ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null,
+                onTap: () => Navigator.pop(context, item),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (value != null) await _setQuality(value);
   }
 }
 
