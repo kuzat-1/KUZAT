@@ -6,18 +6,36 @@ Universal viewer-only video player for YouTube, VK Видео and direct video s
 
 ### Stage 5 — Playback history and Continue Watching 🟢 foundation connected
 
-Implemented in the player:
+Implemented:
 
-- saves playback position to local `SharedPreferences` storage;
-- saves progress periodically while playing;
-- saves again when the player is closed;
-- restores the last position when the same source is opened again;
-- Library reads the same playback history store;
-- finished videos are removed from Continue Watching when they are within the final 10 seconds;
-- VK player also saves/restores position;
-- no download button or download workflow.
+- local `SharedPreferences` playback store;
+- periodic progress saving;
+- save on player exit;
+- resume from the last saved position;
+- Library connected to the same playback history;
+- completed items removed from Continue Watching near the end;
+- VK player position persistence;
+- no download workflow.
 
-### Player capabilities already present
+### Stage 6 — Final player UX and preferences 🟡 started
+
+Started:
+
+- centralized `PlayerPreferences` service for autoplay and default quality;
+- settings keys are now shared by the player layer instead of being duplicated conceptually.
+
+Still to connect:
+
+1. apply autoplay preference when opening YouTube/direct/VK sources;
+2. apply default quality when adaptive tracks are available;
+3. improve Continue Watching cards and resume action;
+4. auto-hide controls with tap-to-show;
+5. stronger network/error states;
+6. Android platform/build scaffold;
+7. real-device testing;
+8. final cleanup before merge to `main`.
+
+## Player capabilities already present
 
 - YouTube through the official YouTube IFrame player wrapper;
 - direct MP4 playback;
@@ -34,20 +52,18 @@ Implemented in the player:
 
 ## Important limitations
 
-These items are **not yet marked production-ready** because this repository has not been verified by a real Android device build in this workflow:
+This repository has not yet been verified by a real Android device build in this workflow.
 
-1. Real VK links still need device/network verification.
-2. HLS/DASH adaptive track switching needs Android-device verification with real multi-rendition streams.
-3. YouTube quality remains controlled by YouTube; KUZAT does not promise forced 1080p/720p selection.
-4. Default quality and autoplay settings are stored by the Settings screen but still need to be applied consistently to every player.
-5. Auto-hide player controls and final mobile UX polish remain.
-6. Full Android/iOS/Web platform scaffolding and CI build verification remain.
+- Real VK links still need device/network verification.
+- HLS/DASH adaptive switching needs Android-device verification with real multi-rendition streams.
+- YouTube quality remains controlled by YouTube; KUZAT does not promise forced 1080p/720p selection.
+- A single MP4 cannot provide hidden adaptive quality switching.
 
 ## Quality model
 
 - **HLS/DASH:** real track selection is available when the source exposes multiple video tracks.
-- **Single MP4:** there is no hidden quality switch; the source has only the quality it provides.
-- **VK:** manual switching is possible when the resolver exposes multiple direct renditions. True adaptive switching requires an adaptive HLS/DASH source.
+- **Single MP4:** the source provides its own fixed quality.
+- **VK:** manual switching is possible when the resolver exposes multiple direct renditions. True adaptive switching requires HLS/DASH.
 - **YouTube:** the official embedded player manages playback quality.
 
 ## Repository workflow
@@ -55,17 +71,3 @@ These items are **not yet marked production-ready** because this repository has 
 Development is being done on branch `kuzat-stage-2-player`.
 
 Changes are kept in small stages so each feature can be checked before moving to the next one.
-
-## Next stage
-
-### Stage 6 — Final player UX and platform verification 🟡
-
-Planned order:
-
-1. apply Settings values to player startup;
-2. improve Continue Watching cards and resume action;
-3. auto-hide controls;
-4. stronger network/error states;
-5. Android platform/build scaffold;
-6. real-device testing for YouTube, VK, MP4 and HLS/DASH;
-7. final cleanup before merging to `main`.
