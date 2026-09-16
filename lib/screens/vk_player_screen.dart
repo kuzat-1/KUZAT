@@ -36,6 +36,12 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     _load();
   }
 
+  Future<void> _retry() async {
+    _result = null;
+    _quality = null;
+    await _load();
+  }
+
   Future<void> _load({String? quality, Duration? resume}) async {
     _saveTimer?.cancel();
     _controlsTimer?.cancel();
@@ -79,13 +85,24 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
       controller.addListener(_refresh);
       _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
       _scheduleControlsHide();
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = 'Не удалось открыть VK Video. Проверьте ссылку или доступность видео.';
+        _error = _vkErrorMessage(error);
         _loading = false;
       });
     }
+  }
+
+  String _vkErrorMessage(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('нет доступного потока')) {
+      return 'Для этого видео VK не предоставил доступный видеопоток.';
+    }
+    if (text.contains('timeout') || text.contains('timed out')) {
+      return 'Время ожидания истекло. Проверьте интернет и попробуйте ещё раз.';
+    }
+    return 'Не удалось открыть VK Видео. Видео может быть удалено, ограничено или временно недоступно.';
   }
 
   String _preferredQuality(Map<String, String> qualities) {
@@ -247,13 +264,13 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   }
 
   Widget _buildVideo() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 12), Text('Загрузка видео…', style: TextStyle(color: Colors.white60))]));
     if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
       const Icon(Icons.error_outline_rounded, color: Colors.white54, size: 48),
       const SizedBox(height: 12),
       Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
       const SizedBox(height: 18),
-      OutlinedButton.icon(onPressed: () => _load(), icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
+      OutlinedButton.icon(onPressed: _retry, icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
     ])));
     final c = _controller;
     if (c == null || !c.value.isInitialized) return const SizedBox.shrink();
