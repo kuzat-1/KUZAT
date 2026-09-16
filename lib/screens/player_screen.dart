@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
+import '../services/playback_preferences.dart';
 import '../services/playback_store.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -28,6 +29,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String _qualityLabel = 'Авто';
   Duration _resume = Duration.zero;
   String _title = 'Видео';
+  PlaybackPreferences _preferences = PlaybackPreferences.defaults();
 
   @override
   void initState() {
@@ -54,6 +56,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _start() async {
     final previous = await PlaybackStore.find(widget.url);
     _resume = previous?.position ?? Duration.zero;
+    _preferences = await PlaybackPreferences.load();
     final yt = _youtubeId(widget.url);
 
     if (yt != null && yt.isNotEmpty) {
@@ -61,7 +64,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _title = previous?.title ?? 'YouTube • $yt';
       _youtube = YoutubePlayerController.fromVideoId(
         videoId: yt,
-        autoPlay: true,
+        autoPlay: _preferences.autoplay,
         startSeconds: _resume.inMilliseconds > 0 ? _resume.inMilliseconds / 1000 : null,
         params: const YoutubePlayerParams(
           showControls: false,
@@ -95,12 +98,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _tracks = [..._tracks]..sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
           final selected = _tracks.where((t) => t.isSelected).firstOrNull;
           if (selected != null) _qualityLabel = _trackLabel(selected);
+          await _applyDefaultQuality(controller);
         } catch (_) {
           _tracks = const [];
         }
       }
       controller.addListener(_videoChanged);
-      await controller.play();
+      if (_preferences.autoplay) await controller.play();
       _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
       if (!mounted) return;
       setState(() => _loading = false);
@@ -108,6 +112,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!mounted) return;
       setState(() { _error = 'Не удалось открыть видео. Проверьте ссылку или доступность источника.'; _loading = false; });
     }
+  }
+
+  Future<void> _applyDefaultQuality(VideoPlayerController controller) async {
+    final wanted = _preferences.defaultQuality;
+    if (wanted == 'Авто' || _tracks.isEmpty) return;
+    final match = _tracks.where((track) => _trackLabel(track) == wanted || '${track.height}p' == wanted).firstOrNull;
+    if (match == null) return;
+    await controller.selectVideoTrack(match);
+    if (mounted) setState(() => _qualityLabel = _trackLabel(match));
   }
 
   void _videoChanged() {
