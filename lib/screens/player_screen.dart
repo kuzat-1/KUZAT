@@ -26,6 +26,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isYoutube = false;
   bool _fullscreen = false;
   bool _controlsVisible = true;
+  bool _retrying = false;
   String? _error;
   double _speed = 1.0;
   String _qualityLabel = 'Авто';
@@ -51,37 +52,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _start() async {
-    final previous = await PlaybackStore.find(widget.url);
-    _resume = previous?.position ?? Duration.zero;
-    _preferences = await PlaybackPreferences.load();
-    final yt = _youtubeId(widget.url);
-
-    if (yt != null && yt.isNotEmpty) {
-      _isYoutube = true;
-      _title = previous?.title ?? 'YouTube • $yt';
-      _youtube = YoutubePlayerController.fromVideoId(
-        videoId: yt,
-        autoPlay: _preferences.autoplay,
-        startSeconds: _resume.inMilliseconds > 0 ? _resume.inMilliseconds / 1000 : null,
-        params: const YoutubePlayerParams(showControls: false, showFullscreenButton: false, strictRelatedVideos: true, privacyEnhancedMode: true, playsInline: true),
-      );
-      _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
-      if (mounted) {
-        setState(() => _loading = false);
-        _scheduleControlsHide();
-      }
-      return;
-    }
-
-    final uri = Uri.tryParse(widget.url);
-    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
-      if (mounted) setState(() { _error = 'Неверная ссылка на видео'; _loading = false; });
-      return;
-    }
+    _saveTimer?.cancel();
+    _controlsTimer?.cancel();
+    final oldVideo = _video;
+    final oldYoutube = _youtube;
+    _video = null;
+    _youtube = null;
+    _tracks = const [];
+    await oldVideo?.dispose();
+    oldYoutube?.close();
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _retrying = false;
+      _controlsVisible = true;
+      _isYoutube = false;
+    });
 
     try {
+      final previous = await PlaybackStore.find(widget.url);
+      _resume = previous?.position ?? Duration.zero;
+      _preferences = await PlaybackPreferences.load();
+      final yt = _youtubeId(widget.url);
+
+      if (yt != null && yt.isNotEmpty) {
+        _isYoutube = true;
+        _title = previous?.title ?? 'YouTube • $yt';
+        final controller = YoutubePlayerController.fromVideoId(
+          videoId: yt,
+          autoPlay: _preferences.autoplay,
+          startSeconds: _resume.inMilliseconds > 0 ? _resume.inMilliseconds / 1000 : null,
+          params: const YoutubePlayerParams(showControls: false, showFullscreenButton: false, strictRelatedVideos: true, privacyEnhancedMode: true, playsInline: true),
+        );
+        _youtube = controller;
+        _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
+        if (mounted) {
+          setState(() => _loading = false);
+          _scheduleControlsHide();
+        }
+        return;
+      }
+
+      final uri = Uri.tryParse(widget.url);
+      if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https') || uri.host.isEmpty) {
+        throw const FormatException('Неверная ссылка');
+      }
+
       final controller = VideoPlayerController.networkUrl(uri);
-      await controller.initialize();
+      await controller.initialize().timeout(const Duration(seconds: 20));
       _video = controller;
       if (_resume > Duration.zero && _resume < controller.value.duration) await controller.seekTo(_resume);
       if (controller.isVideoTrackSupportAvailable()) {
@@ -101,10 +120,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!mounted) return;
       setState(() => _loading = false);
       _scheduleControlsHide();
+    } on TimeoutException {
+      _setError('Источник отвечает слишком долго. Проверьте интернет-соединение и попробуйте ещё раз.');
+    } on FormatException {
+      _setError('Ссылка на видео некорректна. Вернитесь назад и вставьте правильную ссылку.');
     } catch (_) {
-      if (!mounted) return;
-      setState(() { _error = 'Не удалось открыть видео. Проверьте ссылку или доступность источника.'; _loading = false; });
+      if (_isYoutube) {
+        _setError('YouTube не удалось загрузить. Видео может быть недоступно, удалено или ограничено для просмотра.');
+      } else {
+        _setError('Не удалось открыть видео. Источник может быть недоступен, ссылка устарела или формат не поддерживается.');
+      }
     }
+  }
+
+  void _setError(String message) {
+    if (!mounted) return;
+    setState(() {
+      _error = message;
+      _loading = false;
+      _retrying = false;
+    });
+  }
+
+  Future<void> _retry() async {
+    if (_retrying) return;
+    setState(() => _retrying = true);
+    await _start();
   }
 
   Future<void> _applyDefaultQuality(VideoPlayerController controller) async {
@@ -291,9 +332,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
       const Icon(Icons.error_outline_rounded, color: Colors.white54, size: 48),
       const SizedBox(height: 14),
-      Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+      Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, height: 1.4)),
       const SizedBox(height: 18),
-      OutlinedButton.icon(onPressed: () { setState(() { _loading = true; _error = null; }); _start(); }, icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
+      OutlinedButton.icon(onPressed: _retrying ? null : _retry, icon: _retrying ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh_rounded), label: Text(_retrying ? 'Повторная попытка…' : 'Повторить')),
     ])));
 
     final player = _isYoutube && _youtube != null ? YoutubePlayer(controller: _youtube!) : (_video != null && _video!.value.isInitialized ? VideoPlayer(_video!) : const SizedBox.shrink());
@@ -364,35 +405,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
       Row(children: [
         Text('${_format(v.position)} / ${_format(v.duration)}', style: const TextStyle(color: Colors.white, fontSize: 11)),
         const Spacer(),
-        IconButton(onPressed: () { c.setVolume(v.volume == 0 ? 1 : 0); _showControls(); }, color: Colors.white, icon: Icon(v.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
-        Text('${_speed}x', style: const TextStyle(color: Colors.white, fontSize: 12)),
+        IconButton(onPressed: () { c.setVolume(c.value.volume == 0 ? 1 : 0); _showControls(); }, color: Colors.white, icon: Icon(c.value.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
+        Text(_qualityLabel, style: const TextStyle(color: Colors.white, fontSize: 11)),
         IconButton(onPressed: _showSpeed, color: Colors.white, icon: const Icon(Icons.speed_rounded)),
         IconButton(onPressed: _showQuality, color: Colors.white, icon: const Icon(Icons.high_quality_rounded)),
       ]),
     ]);
   }
 
-  Widget _roundButton(IconData icon, VoidCallback onPressed, {bool large = false}) => Material(color: Colors.black45, shape: const CircleBorder(), child: InkWell(onTap: onPressed, customBorder: const CircleBorder(), child: Padding(padding: EdgeInsets.all(large ? 18 : 12), child: Icon(icon, color: Colors.white, size: large ? 34 : 25))));
-
-  String _format(Duration d) {
+  String _format(Duration value) {
     String two(int n) => n.toString().padLeft(2, '0');
-    final h = d.inHours, m = d.inMinutes.remainder(60), s = d.inSeconds.remainder(60);
+    final h = value.inHours, m = value.inMinutes.remainder(60), s = value.inSeconds.remainder(60);
     return h > 0 ? '$h:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
   }
 
+  Widget _roundButton(IconData icon, VoidCallback onPressed, {bool large = false}) {
+    return Material(color: Colors.black.withOpacity(.45), shape: const CircleBorder(), child: InkWell(onTap: onPressed, customBorder: const CircleBorder(), child: Padding(padding: EdgeInsets.all(large ? 18 : 12), child: Icon(icon, color: Colors.white, size: large ? 34 : 25))));
+  }
+
   void _showQuality() {
-    final c = _video;
-    if (_isYoutube || c == null) {
-      showModalBottomSheet<void>(context: context, backgroundColor: const Color(0xFF171717), builder: (_) => const SafeArea(child: Padding(padding: EdgeInsets.fromLTRB(20, 18, 20, 28), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Качество', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), SizedBox(height: 12), ListTile(leading: Icon(Icons.auto_awesome), title: Text('Авто'), subtitle: Text('YouTube автоматически выбирает качество'))]))));
-      return;
-    }
-    final canSelect = c.isVideoTrackSupportAvailable() && _tracks.isNotEmpty;
+    if (_isYoutube) return;
+    final tracks = _tracks;
+    if (tracks.isEmpty) return;
     showModalBottomSheet<void>(context: context, backgroundColor: const Color(0xFF171717), builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Качество', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
       const SizedBox(height: 8),
-      if (!canSelect) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Источник не предоставляет список качества.', style: TextStyle(color: Colors.white60))),
-      if (canSelect) ListTile(leading: const Icon(Icons.auto_awesome), title: const Text('Авто'), trailing: _qualityLabel == 'Авто' ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null, onTap: () => _selectTrack(null)),
-      if (canSelect) for (final track in _tracks) ListTile(leading: const Icon(Icons.hd_outlined), title: Text(_trackLabel(track)), trailing: _qualityLabel == _trackLabel(track) ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null, onTap: () => _selectTrack(track)),
+      ListTile(title: const Text('Авто'), trailing: _qualityLabel == 'Авто' ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null, onTap: () => _selectTrack(null)),
+      for (final track in tracks) ListTile(title: Text(_trackLabel(track)), trailing: _qualityLabel == _trackLabel(track) ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null, onTap: () => _selectTrack(track)),
     ]))));
   }
 
