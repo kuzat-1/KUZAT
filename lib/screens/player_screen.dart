@@ -21,9 +21,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   YoutubePlayerController? _youtube;
   List<VideoTrack> _tracks = const [];
   Timer? _saveTimer;
+  Timer? _controlsTimer;
   bool _loading = true;
   bool _isYoutube = false;
   bool _fullscreen = false;
+  bool _controlsVisible = true;
   String? _error;
   double _speed = 1.0;
   String _qualityLabel = 'Авто';
@@ -40,15 +42,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _youtubeId(String url) {
     final uri = Uri.tryParse(url);
     if (uri == null) return null;
-    if (uri.host.contains('youtu.be')) {
-      return uri.pathSegments.isEmpty ? null : uri.pathSegments.first;
-    }
+    if (uri.host.contains('youtu.be')) return uri.pathSegments.isEmpty ? null : uri.pathSegments.first;
     if (uri.host.contains('youtube.com') || uri.host.contains('youtube-nocookie.com')) {
       if (uri.path == '/watch') return uri.queryParameters['v'];
-      if (uri.pathSegments.length >= 2 &&
-          (uri.pathSegments.first == 'shorts' || uri.pathSegments.first == 'embed')) {
-        return uri.pathSegments[1];
-      }
+      if (uri.pathSegments.length >= 2 && (uri.pathSegments.first == 'shorts' || uri.pathSegments.first == 'embed')) return uri.pathSegments[1];
     }
     return null;
   }
@@ -66,16 +63,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         videoId: yt,
         autoPlay: _preferences.autoplay,
         startSeconds: _resume.inMilliseconds > 0 ? _resume.inMilliseconds / 1000 : null,
-        params: const YoutubePlayerParams(
-          showControls: false,
-          showFullscreenButton: false,
-          strictRelatedVideos: true,
-          privacyEnhancedMode: true,
-          playsInline: true,
-        ),
+        params: const YoutubePlayerParams(showControls: false, showFullscreenButton: false, strictRelatedVideos: true, privacyEnhancedMode: true, playsInline: true),
       );
       _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+        _scheduleControlsHide();
+      }
       return;
     }
 
@@ -89,9 +83,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final controller = VideoPlayerController.networkUrl(uri);
       await controller.initialize();
       _video = controller;
-      if (_resume > Duration.zero && _resume < controller.value.duration) {
-        await controller.seekTo(_resume);
-      }
+      if (_resume > Duration.zero && _resume < controller.value.duration) await controller.seekTo(_resume);
       if (controller.isVideoTrackSupportAvailable()) {
         try {
           _tracks = await controller.getVideoTracks();
@@ -108,6 +100,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
       if (!mounted) return;
       setState(() => _loading = false);
+      _scheduleControlsHide();
     } catch (_) {
       if (!mounted) return;
       setState(() { _error = 'Не удалось открыть видео. Проверьте ссылку или доступность источника.'; _loading = false; });
@@ -124,7 +117,58 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _videoChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (_video?.value.isPlaying == true && _controlsVisible) _scheduleControlsHide();
+  }
+
+  void _scheduleControlsHide() {
+    _controlsTimer?.cancel();
+    final playing = _isYoutube ? _youtube != null : _video?.value.isPlaying == true;
+    if (!playing) return;
+    _controlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _showControls() {
+    if (!mounted) return;
+    setState(() => _controlsVisible = true);
+    _scheduleControlsHide();
+  }
+
+  void _toggleControls() {
+    if (_controlsVisible) {
+      _controlsTimer?.cancel();
+      setState(() => _controlsVisible = false);
+    } else {
+      _showControls();
+    }
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isYoutube && _youtube != null) {
+      final state = await _youtube!.playerState;
+      if (state == PlayerState.playing) {
+        await _youtube!.pauseVideo();
+        _controlsTimer?.cancel();
+        if (mounted) setState(() => _controlsVisible = true);
+      } else {
+        await _youtube!.playVideo();
+        _showControls();
+      }
+      return;
+    }
+    final c = _video;
+    if (c == null) return;
+    if (c.value.isPlaying) {
+      await c.pause();
+      _controlsTimer?.cancel();
+      if (mounted) setState(() => _controlsVisible = true);
+    } else {
+      await c.play();
+      _showControls();
+    }
   }
 
   Future<void> _saveProgress() async {
@@ -144,13 +188,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await PlaybackStore.remove(widget.url);
       return;
     }
-    await PlaybackStore.save(PlaybackEntry(
-      url: widget.url,
-      title: _title,
-      positionMs: position.inMilliseconds,
-      durationMs: duration.inMilliseconds,
-      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-    ));
+    await PlaybackStore.save(PlaybackEntry(url: widget.url, title: _title, positionMs: position.inMilliseconds, durationMs: duration.inMilliseconds, updatedAtMs: DateTime.now().millisecondsSinceEpoch));
   }
 
   String _trackLabel(VideoTrack track) {
@@ -163,6 +201,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _controlsTimer?.cancel();
     unawaited(_saveProgress());
     _video?.removeListener(_videoChanged);
     _video?.dispose();
@@ -177,7 +216,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _toggleFullscreen() async {
-    if (_isYoutube) { _youtube?.toggleFullScreen(); return; }
+    if (_isYoutube) {
+      _youtube?.toggleFullScreen();
+      _showControls();
+      return;
+    }
     final next = !_fullscreen;
     setState(() => _fullscreen = next);
     if (next) {
@@ -186,6 +229,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       await _restoreSystemUi();
     }
+    _showControls();
   }
 
   Future<void> _seekBy(Duration delta) async {
@@ -196,6 +240,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (target < Duration.zero) target = Duration.zero;
     if (target > v.duration) target = v.duration;
     await c.seekTo(target);
+    _showControls();
+  }
+
+  Future<void> _youtubeSeekBy(double delta) async {
+    final c = _youtube;
+    if (c == null) return;
+    final position = await c.currentTime;
+    final duration = await c.duration;
+    await c.seekTo(seconds: (position + delta).clamp(0.0, duration).toDouble());
+    _showControls();
   }
 
   Future<void> _selectTrack(VideoTrack? track) async {
@@ -209,114 +263,116 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted) return;
     setState(() => _qualityLabel = track == null ? 'Авто' : _trackLabel(track));
     Navigator.pop(context);
+    _showControls();
   }
 
   Future<void> _setSpeed(double speed) async {
     _speed = speed;
     await _video?.setPlaybackSpeed(speed);
     await _youtube?.setPlaybackRate(speed);
-    if (mounted) { setState(() {}); Navigator.pop(context); }
+    if (mounted) {
+      setState(() {});
+      Navigator.pop(context);
+      _showControls();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _fullscreen ? null : AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-        actions: [
-          IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)),
-          IconButton(onPressed: _toggleFullscreen, icon: const Icon(Icons.fullscreen_rounded)),
-        ],
-      ),
-      body: SafeArea(
-        top: !_fullscreen,
-        bottom: !_fullscreen,
-        child: Column(children: [Expanded(child: Center(child: _buildPlayer())), if (!_loading && _error == null) _controls()]),
-      ),
+      appBar: _fullscreen ? null : AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white, title: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+      body: SafeArea(top: !_fullscreen, bottom: !_fullscreen, child: _buildPlayer()),
     );
   }
 
   Widget _buildPlayer() {
-    if (_loading) return const Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 12), Text('Загрузка видео…', style: TextStyle(color: Colors.white60))]);
-    if (_error != null) return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.error_outline_rounded, color: Colors.white54, size: 48),
-        const SizedBox(height: 14),
-        Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 18),
-        OutlinedButton.icon(onPressed: () { setState(() { _loading = true; _error = null; }); _start(); }, icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
+    if (_loading) return const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 12), Text('Загрузка видео…', style: TextStyle(color: Colors.white60))]));
+    if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Icon(Icons.error_outline_rounded, color: Colors.white54, size: 48),
+      const SizedBox(height: 14),
+      Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+      const SizedBox(height: 18),
+      OutlinedButton.icon(onPressed: () { setState(() { _loading = true; _error = null; }); _start(); }, icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
+    ])));
+
+    final player = _isYoutube && _youtube != null ? YoutubePlayer(controller: _youtube!) : (_video != null && _video!.value.isInitialized ? VideoPlayer(_video!) : const SizedBox.shrink());
+    final aspect = _isYoutube ? 16 / 9 : (_video?.value.aspectRatio ?? 16 / 9);
+    return Center(child: AspectRatio(aspectRatio: aspect, child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _toggleControls,
+      child: Stack(children: [
+        Positioned.fill(child: player),
+        if (!_isYoutube && _video?.value.isBuffering == true) const Center(child: CircularProgressIndicator()),
+        _overlayControls(),
       ]),
-    );
-    if (_isYoutube && _youtube != null) return AspectRatio(aspectRatio: 16 / 9, child: YoutubePlayer(controller: _youtube!));
-    final c = _video;
-    if (c != null && c.value.isInitialized) return AspectRatio(
-      aspectRatio: c.value.aspectRatio,
-      child: Stack(alignment: Alignment.center, children: [VideoPlayer(c), if (c.value.isBuffering) const IgnorePointer(child: CircularProgressIndicator())]),
-    );
-    return const SizedBox.shrink();
+    )));
   }
 
-  Widget _controls() {
-    if (_isYoutube && _youtube != null) return _youtubeControls(_youtube!);
+  Widget _overlayControls() {
+    return AnimatedOpacity(
+      opacity: _controlsVisible ? 1 : 0,
+      duration: const Duration(milliseconds: 180),
+      child: IgnorePointer(ignoring: !_controlsVisible, child: Stack(children: [
+        Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black54, Colors.transparent, Colors.black87], stops: const [0, .42, 1])))),
+        Positioned(top: 10, left: 10, right: 10, child: Row(children: [
+          Expanded(child: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700))),
+          IconButton(onPressed: _showSpeed, color: Colors.white, icon: const Icon(Icons.speed_rounded)),
+          IconButton(onPressed: _toggleFullscreen, color: Colors.white, icon: Icon(_fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded)),
+        ])),
+        Center(child: Row(mainAxisSize: MainAxisSize.min, children: [
+          _roundButton(Icons.replay_10_rounded, () => _isYoutube ? _youtubeSeekBy(-10) : _seekBy(const Duration(seconds: -10))),
+          const SizedBox(width: 18),
+          _roundButton(_playing ? Icons.pause_rounded : Icons.play_arrow_rounded, _togglePlay, large: true),
+          const SizedBox(width: 18),
+          _roundButton(Icons.forward_10_rounded, () => _isYoutube ? _youtubeSeekBy(10) : _seekBy(const Duration(seconds: 10))),
+        ])),
+        Positioned(left: 10, right: 10, bottom: 8, child: _bottomControls()),
+      ])),
+    );
+  }
+
+  bool get _playing => _video?.value.isPlaying == true;
+
+  Widget _bottomControls() {
+    if (_isYoutube && _youtube != null) {
+      return YoutubeValueBuilder(controller: _youtube!, builder: (context, value) {
+        final duration = value.metaData.duration;
+        return Column(children: [
+          StreamBuilder<Duration>(stream: _youtube!.getCurrentPositionStream(period: const Duration(milliseconds: 500)), builder: (context, snapshot) {
+            final position = snapshot.data ?? Duration.zero;
+            final max = duration <= 0 ? 1.0 : duration;
+            final current = (position.inMilliseconds / 1000).clamp(0.0, max).toDouble();
+            return Slider(value: current, max: max, onChanged: (s) => _youtube!.seekTo(seconds: s), activeColor: const Color(0xFFFFC107), inactiveColor: Colors.white30);
+          }),
+          Row(children: [
+            Text(_format(value.metaData.duration), style: const TextStyle(color: Colors.white, fontSize: 11)),
+            const Spacer(),
+            Text('${_speed}x', style: const TextStyle(color: Colors.white, fontSize: 12)),
+            IconButton(onPressed: _showSpeed, color: Colors.white, icon: const Icon(Icons.speed_rounded)),
+            IconButton(onPressed: _showQuality, color: Colors.white, icon: const Icon(Icons.high_quality_rounded)),
+          ]),
+          const Align(alignment: Alignment.centerLeft, child: Text('YouTube: качество выбирается автоматически', style: TextStyle(color: Colors.white54, fontSize: 10))),
+        ]);
+      });
+    }
     final c = _video;
     if (c == null) return const SizedBox.shrink();
     final v = c.value;
-    return Material(
-      color: const Color(0xFF0D0D0D),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-        child: Column(children: [
-          VideoProgressIndicator(c, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Color(0xFFFFC107), bufferedColor: Colors.white38, backgroundColor: Colors.white12), padding: const EdgeInsets.symmetric(vertical: 8)),
-          Row(children: [
-            IconButton(onPressed: () => _seekBy(const Duration(seconds: -10)), icon: const Icon(Icons.replay_10_rounded)),
-            IconButton(onPressed: () => v.isPlaying ? c.pause() : c.play(), icon: Icon(v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded)),
-            IconButton(onPressed: () => _seekBy(const Duration(seconds: 10)), icon: const Icon(Icons.forward_10_rounded)),
-            Text('${_format(v.position)} / ${_format(v.duration)}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
-            const Spacer(),
-            IconButton(onPressed: () => c.setVolume(v.volume == 0 ? 1 : 0), icon: Icon(v.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
-            IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)),
-            IconButton(onPressed: _showQuality, icon: const Icon(Icons.high_quality_rounded)),
-            IconButton(onPressed: _toggleFullscreen, icon: const Icon(Icons.fullscreen_rounded)),
-          ]),
-        ]),
-      ),
-    );
+    return Column(children: [
+      VideoProgressIndicator(c, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Color(0xFFFFC107), bufferedColor: Colors.white54, backgroundColor: Colors.white30), padding: const EdgeInsets.symmetric(vertical: 8)),
+      Row(children: [
+        Text('${_format(v.position)} / ${_format(v.duration)}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+        const Spacer(),
+        IconButton(onPressed: () { c.setVolume(v.volume == 0 ? 1 : 0); _showControls(); }, color: Colors.white, icon: Icon(v.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
+        Text('${_speed}x', style: const TextStyle(color: Colors.white, fontSize: 12)),
+        IconButton(onPressed: _showSpeed, color: Colors.white, icon: const Icon(Icons.speed_rounded)),
+        IconButton(onPressed: _showQuality, color: Colors.white, icon: const Icon(Icons.high_quality_rounded)),
+      ]),
+    ]);
   }
 
-  Widget _youtubeControls(YoutubePlayerController controller) => Material(
-    color: const Color(0xFF0D0D0D),
-    child: YoutubeValueBuilder(controller: controller, builder: (context, value) {
-      final duration = value.metaData.duration;
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        child: Column(children: [
-          StreamBuilder<Duration>(
-            stream: controller.getCurrentPositionStream(period: const Duration(milliseconds: 500)),
-            builder: (context, snapshot) {
-              final position = snapshot.data ?? Duration.zero;
-              final max = duration <= 0 ? 1.0 : duration;
-              final current = (position.inMilliseconds / 1000).clamp(0.0, max).toDouble();
-              return Slider(value: current, max: max, onChanged: (s) => controller.seekTo(seconds: s));
-            },
-          ),
-          Row(children: [
-            IconButton(onPressed: () async { final p = await controller.currentTime; await controller.seekTo(seconds: (p - 10).clamp(0.0, duration).toDouble()); }, icon: const Icon(Icons.replay_10_rounded)),
-            IconButton(onPressed: () => value.playerState == PlayerState.playing ? controller.pauseVideo() : controller.playVideo(), icon: Icon(value.playerState == PlayerState.playing ? Icons.pause_rounded : Icons.play_arrow_rounded)),
-            IconButton(onPressed: () async { final p = await controller.currentTime; await controller.seekTo(seconds: (p + 10).clamp(0.0, duration).toDouble()); }, icon: const Icon(Icons.forward_10_rounded)),
-            const Spacer(),
-            Text('${_speed}x', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)),
-            IconButton(onPressed: _toggleFullscreen, icon: const Icon(Icons.fullscreen_rounded)),
-          ]),
-          const Align(alignment: Alignment.centerLeft, child: Text('Качество: Auto — качество выбирает YouTube', style: TextStyle(color: Colors.white45, fontSize: 11))),
-        ]),
-      );
-    }),
-  );
+  Widget _roundButton(IconData icon, VoidCallback onPressed, {bool large = false}) => Material(color: Colors.black45, shape: const CircleBorder(), child: InkWell(onTap: onPressed, customBorder: const CircleBorder(), child: Padding(padding: EdgeInsets.all(large ? 18 : 12), child: Icon(icon, color: Colors.white, size: large ? 34 : 25))));
 
   String _format(Duration d) {
     String two(int n) => n.toString().padLeft(2, '0');
@@ -331,18 +387,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
     final canSelect = c.isVideoTrackSupportAvailable() && _tracks.isNotEmpty;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF171717),
-      builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Качество', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        if (!canSelect) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Источник не предоставляет отдельные варианты качества.', style: TextStyle(color: Colors.white60))) else ...[
-          ListTile(leading: const Icon(Icons.auto_awesome), title: const Text('Авто'), trailing: _qualityLabel == 'Авто' ? const Icon(Icons.check_rounded) : null, onTap: () => _selectTrack(null)),
-          for (final track in _tracks) ListTile(leading: const Icon(Icons.hd_outlined), title: Text(_trackLabel(track)), trailing: _qualityLabel == _trackLabel(track) ? const Icon(Icons.check_rounded) : null, onTap: () => _selectTrack(track)),
-        ],
-      ]))),
-    );
+    showModalBottomSheet<void>(context: context, backgroundColor: const Color(0xFF171717), builder: (_) => SafeArea(child: Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Качество', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (!canSelect) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Источник не предоставляет список качества.', style: TextStyle(color: Colors.white60))),
+      if (canSelect) ListTile(leading: const Icon(Icons.auto_awesome), title: const Text('Авто'), trailing: _qualityLabel == 'Авто' ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null, onTap: () => _selectTrack(null)),
+      if (canSelect) for (final track in _tracks) ListTile(leading: const Icon(Icons.hd_outlined), title: Text(_trackLabel(track)), trailing: _qualityLabel == _trackLabel(track) ? const Icon(Icons.check_rounded, color: Color(0xFFFFC107)) : null, onTap: () => _selectTrack(track)),
+    ]))));
   }
 
   void _showSpeed() {
