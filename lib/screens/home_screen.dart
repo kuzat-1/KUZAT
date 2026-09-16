@@ -17,31 +17,45 @@ class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
   int _tab = 0;
   int _bottom = 0;
+  bool _opening = false;
 
-  void _open() {
+  Future<void> _open() async {
+    if (_opening) return;
     final prepared = _prepareUrl(_urlController.text);
     if (prepared == null) {
-      _showMessage('Введите корректную ссылку http:// или https://');
+      _showMessage('Введите корректную ссылку на видео.');
       return;
     }
 
-    final screen = VkService.isVkUrl(prepared)
-        ? VkPlayerScreen(url: prepared)
-        : PlayerScreen(url: prepared);
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    FocusScope.of(context).unfocus();
+    setState(() => _opening = true);
+    try {
+      final screen = VkService.isVkUrl(prepared)
+          ? VkPlayerScreen(url: prepared)
+          : PlayerScreen(url: prepared);
+      if (mounted) {
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+      }
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
   }
 
   String? _prepareUrl(String raw) {
     var value = raw.trim();
     if (value.isEmpty) return null;
 
-    // Convenient for pasted domains such as youtube.com/... or vk.com/....
+    // Allow users to paste youtube.com/... or vk.com/... without a scheme.
     if (!value.contains('://')) value = 'https://$value';
 
     final uri = Uri.tryParse(value);
-    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https') || uri.host.isEmpty) {
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        !uri.host.contains('.')) {
       return null;
     }
+
     return uri.toString();
   }
 
@@ -49,7 +63,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message), behavior: SnackBarBehavior.floating));
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ));
   }
 
   @override
@@ -115,14 +133,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 onSubmitted: (_) => _open(),
                                 keyboardType: TextInputType.url,
                                 textInputAction: TextInputAction.go,
+                                enabled: !_opening,
                                 decoration: const InputDecoration(hintText: 'Вставьте ссылку на видео', border: InputBorder.none),
                               ),
                             ),
                             Padding(
                               padding: const EdgeInsets.only(right: 7),
                               child: IconButton.filled(
-                                onPressed: _open,
-                                icon: const Icon(Icons.search_rounded),
+                                onPressed: _opening ? null : _open,
+                                icon: _opening
+                                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Icon(Icons.search_rounded),
                                 style: IconButton.styleFrom(backgroundColor: const Color(0xFFFFC107), foregroundColor: Colors.black),
                               ),
                             ),
