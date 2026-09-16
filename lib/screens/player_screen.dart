@@ -16,7 +16,7 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   VideoPlayerController? _video;
   YoutubePlayerController? _youtube;
   List<VideoTrack> _tracks = const [];
@@ -27,6 +27,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _fullscreen = false;
   bool _controlsVisible = true;
   bool _retrying = false;
+  bool _wasPlayingBeforePause = false;
+  AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
   String? _error;
   double _speed = 1.0;
   String _qualityLabel = 'Авто';
@@ -37,7 +39,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _start();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.detached) {
+      _wasPlayingBeforePause = _isPlaying;
+      _controlsTimer?.cancel();
+      unawaited(_saveProgress());
+      if (_wasPlayingBeforePause) unawaited(_pauseForLifecycle());
+    } else if (state == AppLifecycleState.resumed) {
+      if (_wasPlayingBeforePause) unawaited(_resumeAfterLifecycle());
+    }
+  }
+
+  bool get _isPlaying => _isYoutube ? _youtube != null : _video?.value.isPlaying == true;
+
+  Future<void> _pauseForLifecycle() async {
+    if (_isYoutube && _youtube != null) {
+      await _youtube!.pauseVideo();
+    } else {
+      await _video?.pause();
+    }
+  }
+
+  Future<void> _resumeAfterLifecycle() async {
+    if (!mounted || _lifecycleState != AppLifecycleState.resumed) return;
+    if (_isYoutube && _youtube != null) {
+      await _youtube!.playVideo();
+    } else {
+      await _video?.play();
+    }
+    if (mounted) _showControls();
   }
 
   String? _youtubeId(String url) {
@@ -81,7 +117,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _title = previous?.title ?? 'YouTube • $yt';
         final controller = YoutubePlayerController.fromVideoId(
           videoId: yt,
-          autoPlay: _preferences.autoplay,
+          autoPlay: _preferences.autoplay && _lifecycleState == AppLifecycleState.resumed,
           startSeconds: _resume.inMilliseconds > 0 ? _resume.inMilliseconds / 1000 : null,
           params: const YoutubePlayerParams(showControls: false, showFullscreenButton: false, strictRelatedVideos: true, privacyEnhancedMode: true, playsInline: true),
         );
@@ -115,8 +151,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
       controller.addListener(_videoChanged);
-      if (_preferences.autoplay) await controller.play();
-      _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
+      if (_preferences.autoplay && _lifecycleState == AppLifecycleState.resumed) await controller.play();
       if (!mounted) return;
       setState(() => _loading = false);
       _scheduleControlsHide();
@@ -165,10 +200,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _scheduleControlsHide() {
     _controlsTimer?.cancel();
-    final playing = _isYoutube ? _youtube != null : _video?.value.isPlaying == true;
-    if (!playing) return;
+    if (!_isPlaying) return;
     _controlsTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _controlsVisible = false);
+      if (mounted && _isPlaying) setState(() => _controlsVisible = false);
     });
   }
 
@@ -241,6 +275,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _saveTimer?.cancel();
     _controlsTimer?.cancel();
     unawaited(_saveProgress());
