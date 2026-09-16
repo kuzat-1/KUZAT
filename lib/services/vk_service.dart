@@ -56,22 +56,27 @@ class VkService {
     final normalized = normalizeId(input);
     final candidates = <String>[input.trim()];
 
-    if (normalized != null && !input.contains('://')) {
+    // Keep the original URL first, but also add canonical VK fallbacks even
+    // when the user pasted a full URL. A redirect/error on one endpoint must
+    // not prevent trying the other public VK representations.
+    if (normalized != null) {
       candidates.add('https://vk.com/video$normalized');
       candidates.add('https://vkvideo.ru/video$normalized');
-    }
 
-    if (normalized != null && normalized.contains('_')) {
-      final parts = normalized.split('_');
-      candidates.add('https://vk.com/video_ext.php?oid=${parts[0]}&id=${parts[1]}');
-      candidates.add('https://vk.com/al_video.php?act=show&al=1&video=$normalized');
+      if (normalized.contains('_')) {
+        final parts = normalized.split('_');
+        candidates.add('https://vk.com/video_ext.php?oid=${parts[0]}&id=${parts[1]}');
+        candidates.add('https://vk.com/al_video.php?act=show&al=1&video=$normalized');
+      }
     }
 
     Object? lastError;
     for (final url in candidates.toSet()) {
       try {
+        final uri = Uri.tryParse(url);
+        if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) continue;
         final response = await http
-            .get(Uri.parse(url), headers: _headers)
+            .get(uri, headers: _headers)
             .timeout(const Duration(seconds: 15));
         if (response.statusCode < 200 || response.statusCode >= 400) continue;
 
@@ -98,6 +103,17 @@ class VkService {
       caseSensitive: false,
     );
     for (final match in urlPattern.allMatches(body)) {
+      final quality = match.group(1)!;
+      final url = _unescape(match.group(2)!);
+      if (_isPlayableUrl(url)) qualities[quality] = url;
+    }
+
+    // Some VK responses use url_720/url_1080 or similar names.
+    final namedPattern = RegExp(
+      r'\\?"url[_-]?(\d{3,4})p?\\?"\s*:\s*\\?"((?:[^"\\]|\\.)+)\\?"',
+      caseSensitive: false,
+    );
+    for (final match in namedPattern.allMatches(body)) {
       final quality = match.group(1)!;
       final url = _unescape(match.group(2)!);
       if (_isPlayableUrl(url)) qualities[quality] = url;
@@ -139,7 +155,10 @@ class VkService {
   }
 
   static String? _qualityFromUrl(String url) {
-    final match = RegExp(r'(?:_|-|/)(\d{3,4})(?:p)?(?:[._/?-]|$)', caseSensitive: false).firstMatch(url);
+    final match = RegExp(
+      r'(?:_|-|/)(\d{3,4})(?:p)?(?:[._/?-]|$)',
+      caseSensitive: false,
+    ).firstMatch(url);
     return match?.group(1);
   }
 
