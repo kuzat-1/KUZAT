@@ -1,208 +1,71 @@
 # KUZAT
 
-**KUZAT** — универсальный видеоплеер для просмотра видео из YouTube, VK Видео и прямых видеоисточников.
+Universal viewer-only video player for YouTube, VK Видео and direct video sources.
 
-> Цель: современный viewer-only плеер. Скачивание видео в приложение не добавляем.
+## Current status
 
-## 📍 Текущий статус
+### Stage 5 — Playback history and Continue Watching 🟢 foundation connected
 
-**Этап 4 — VK Video: 🟡 первая реализация + подготовка следующего этапа**
+Implemented in the player:
 
-### Подтверждено кодом
+- saves playback position to local `SharedPreferences` storage;
+- saves progress periodically while playing;
+- saves again when the player is closed;
+- restores the last position when the same source is opened again;
+- Library reads the same playback history store;
+- finished videos are removed from Continue Watching when they are within the final 10 seconds;
+- VK player also saves/restores position;
+- no download button or download workflow.
 
-- [x] Flutter + Material 3 + тёмная тема.
-- [x] Главный экран KUZAT.
-- [x] Вкладки **Поиск / YouTube / VK Видео**.
-- [x] Поле URL и запуск видео.
-- [x] Нижняя навигация **Главная / Библиотека / Настройки**.
-- [x] Рабочее переключение нижних разделов на отдельные экраны.
-- [x] YouTube через официальный YouTube IFrame Player.
-- [x] MP4 / прямой URL через `video_player`.
-- [x] Базовое воспроизведение HLS/M3U8.
-- [x] API `VideoTrack` для adaptive HLS/DASH.
-- [x] Play/Pause, прогресс и перемотка.
-- [x] Назад/вперёд на 10 секунд.
-- [x] Громкость / mute.
-- [x] Скорость 0.5x–2x.
-- [x] Fullscreen для прямого плеера.
-- [x] Fullscreen через YouTube API.
-- [x] Индикатор буферизации.
-- [x] Ошибка + повторная попытка.
-- [x] Выбор доступного `VideoTrack`, если источник его предоставляет.
-- [x] Сохранение позиции при смене adaptive track.
-- [x] Для YouTube показывается Auto: качество выбирает сам YouTube.
-- [x] Определение VK-ссылок.
-- [x] Отдельный viewer-плеер VK.
-- [x] VK resolver для публичных страниц.
-- [x] Поддержка вариантов `url360`, `url480`, `url720`, `url1080` и подобных, если они присутствуют на странице.
-- [x] Обработка прямых MP4/HLS/DASH URL, если они присутствуют в доступной странице.
-- [x] Переключение найденных VK вариантов с сохранением позиции.
-- [x] Скорость, seek, mute, fullscreen и buffering в VK-плеере.
-- [x] Нет кнопки скачивания.
-- [x] Локальное хранилище для истории и экран Библиотеки подготовлены.
-- [x] Экран Настроек подготовлен с автовоспроизведением, качеством по умолчанию и очисткой истории.
+### Player capabilities already present
 
-### ⚠️ Пока НЕ считаем готовым
+- YouTube through the official YouTube IFrame player wrapper;
+- direct MP4 playback;
+- HLS/DASH track API integration through `video_player`;
+- Auto/manual track selection where the source exposes adaptive tracks;
+- VK Video resolver and viewer player;
+- seek ±10 seconds;
+- volume/mute;
+- playback speed;
+- fullscreen;
+- buffering indicator;
+- dark KUZAT interface;
+- `Главная / Библиотека / Настройки` navigation.
 
-- [ ] Реальный запуск и сборка на Android-телефоне.
-- [ ] Реальное тестирование VK на разных публичных ссылках.
-- [ ] Гарантированная работа VK при изменении HTML/внутреннего формата VK.
-- [ ] Проверка VK 360p/480p/720p/1080p на реальных источниках.
-- [ ] Проверка HLS/DASH на Android.
-- [ ] Подключение сохранения позиции плеера к локальному хранилищу.
-- [ ] Автоматическое добавление реально просмотренных видео в Библиотеку.
-- [ ] Продолжить просмотр с сохранённой позиции.
-- [ ] Применение настройки качества по умолчанию к плееру.
-- [ ] Применение настройки автовоспроизведения к плееру.
-- [ ] Автоматическое скрытие controls.
-- [ ] Полная обработка сетевых ошибок.
-- [ ] Полный Android/iOS/Web scaffold.
-- [ ] CI-сборка.
-- [ ] Финальное тестирование на реальном устройстве.
+## Important limitations
 
----
+These items are **not yet marked production-ready** because this repository has not been verified by a real Android device build in this workflow:
 
-# 🛠️ План разработки
+1. Real VK links still need device/network verification.
+2. HLS/DASH adaptive track switching needs Android-device verification with real multi-rendition streams.
+3. YouTube quality remains controlled by YouTube; KUZAT does not promise forced 1080p/720p selection.
+4. Default quality and autoplay settings are stored by the Settings screen but still need to be applied consistently to every player.
+5. Auto-hide player controls and final mobile UX polish remain.
+6. Full Android/iOS/Web platform scaffolding and CI build verification remain.
 
-## Этап 1 — Основа
+## Quality model
 
-**Статус: 🟢**
+- **HLS/DASH:** real track selection is available when the source exposes multiple video tracks.
+- **Single MP4:** there is no hidden quality switch; the source has only the quality it provides.
+- **VK:** manual switching is possible when the resolver exposes multiple direct renditions. True adaptive switching requires an adaptive HLS/DASH source.
+- **YouTube:** the official embedded player manages playback quality.
 
-Flutter, Material 3, тёмная тема, главный экран, URL input и базовая навигация.
+## Repository workflow
 
-## Этап 2 — Универсальный плеер
+Development is being done on branch `kuzat-stage-2-player`.
 
-**Статус: 🟢 базовая реализация**
+Changes are kept in small stages so each feature can be checked before moving to the next one.
 
-YouTube, MP4/direct URL, HLS/M3U8, play/pause, seek, ±10 секунд, mute, скорость, fullscreen, buffering и retry.
+## Next stage
 
-## Этап 3 — Настоящее качество
+### Stage 6 — Final player UX and platform verification 🟡
 
-**Статус: 🟡 реализовано в коде, нужна проверка на устройствах**
+Planned order:
 
-`video_player 2.14.0` предоставляет `getVideoTracks()`, `selectVideoTrack()` и `isVideoTrackSupportAvailable()` для adaptive HLS/DASH потоков.
-
-- [x] Получение `VideoTrack`.
-- [x] Auto.
-- [x] Ручной выбор доступной дорожки.
-- [x] Сохранение позиции при смене дорожки.
-- [ ] Проверка HLS на реальном источнике.
-- [ ] Проверка DASH на реальном источнике.
-- [ ] Проверка Android.
-
-### YouTube
-
-YouTube работает через официальный IFrame Player. KUZAT не обещает принудительный выбор разрешения YouTube: в интерфейсе используется Auto.
-
-## Этап 4 — VK Видео
-
-**Статус: 🟡 первая реализация, техническая проверка продолжается**
-
-- [x] Определение VK-ссылок.
-- [x] VK viewer screen.
-- [x] Resolver публичных страниц.
-- [x] Разбор `urlXXX` вариантов.
-- [x] Поиск прямых MP4/M3U8/MPD URL.
-- [x] Переключение найденных вариантов.
-- [x] Сохранение позиции при переключении.
-- [x] Playback controls.
-- [ ] Проверить `vk.com/video...` на реальном устройстве.
-- [ ] Проверить `vkvideo.ru/video...` на реальном устройстве.
-- [ ] Проверить `video_ext.php`.
-- [ ] Проверить новые slug-форматы.
-- [ ] Обработать закрытые/возрастные/недоступные видео.
-- [ ] Проверить HLS/ABR VK.
-- [ ] Проверить Android.
-
-## Этап 5 — Библиотека и история
-
-**Статус: 🟡 каркас подготовлен, интеграция плеера ещё не завершена**
-
-- [x] Локальное хранилище `SharedPreferences`.
-- [x] Экран Библиотека.
-- [x] Очистка истории.
-- [x] Удаление отдельной записи свайпом.
-- [ ] Записывать позицию во время просмотра.
-- [ ] Автоматически добавлять просмотренные видео.
-- [ ] Продолжать просмотр с сохранённой позиции.
-- [ ] Избранное — при необходимости.
-
-## Этап 6 — Настройки
-
-**Статус: 🟡 каркас подготовлен**
-
-- [x] Экран Настройки.
-- [x] Автовоспроизведение.
-- [x] Качество по умолчанию — сохранение выбора.
-- [x] Очистка истории.
-- [x] О KUZAT.
-- [ ] Применить настройки непосредственно к плееру.
-- [ ] Экономия трафика.
-- [ ] Скорость по умолчанию.
-- [ ] Повтор.
-
-## Этап 7 — Финальный UI/UX
-
-**Статус: 🟡 основа есть**
-
-- [x] Dark KUZAT style.
-- [x] Branding.
-- [ ] Финальный экран плеера.
-- [ ] Автоскрытие controls.
-- [ ] Адаптация маленьких экранов.
-- [ ] Планшеты.
-- [ ] Loading/empty/error states.
-- [ ] Финальная типографика и spacing.
-
-## Этап 8 — Android / iOS / Web
-
-**Статус: 🔴**
-
-- [ ] Полный Flutter platform scaffold.
-- [ ] Android.
-- [ ] iOS.
-- [ ] Web.
-- [ ] Иконка KUZAT.
-- [ ] Splash screen.
-- [ ] Network configuration.
-- [ ] Release configuration.
-
-## Этап 9 — Финальное тестирование
-
-**Статус: 🔴**
-
-YouTube: watch, youtu.be, Shorts, embed, ошибки, fullscreen, скорость.
-
-VK: обычные ссылки, vkvideo.ru, video_ext.php, разные качества, HLS, недоступные видео.
-
-Direct: MP4, M3U8/HLS, DASH, медленная сеть и потеря сети.
-
----
-
-# 🧭 Правило разработки
-
-Работаем строго по шагам:
-
-**1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9**
-
-После каждого этапа:
-
-1. Пишем код.
-2. Проверяем логику.
-3. Обновляем README.
-4. Отмечаем `[x]` только подтверждённые функции.
-5. Фиксируем следующий этап.
-
----
-
-# 🚫 В KUZAT не будет
-
-- ❌ Download button.
-- ❌ Download manager.
-- ❌ Декоративных настроек без реализации.
-
-Каждая функция интерфейса должна реально работать.
-
-# 🎯 Финальная цель
-
-**YouTube + VK Видео + MP4 + HLS + DASH → один KUZAT интерфейс → удобный просмотр → качество → скорость → fullscreen → история → библиотека → настройки.**
+1. apply Settings values to player startup;
+2. improve Continue Watching cards and resume action;
+3. auto-hide controls;
+4. stronger network/error states;
+5. Android platform/build scaffold;
+6. real-device testing for YouTube, VK, MP4 and HLS/DASH;
+7. final cleanup before merging to `main`.
