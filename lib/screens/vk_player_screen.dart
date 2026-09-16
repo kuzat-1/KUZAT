@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../services/playback_preferences.dart';
 import '../services/playback_store.dart';
 import '../services/vk_service.dart';
 
@@ -25,6 +26,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   double _speedValue = 1;
   String? _quality;
   Duration _resume = Duration.zero;
+  PlaybackPreferences _preferences = PlaybackPreferences.defaults();
 
   @override
   void initState() {
@@ -41,17 +43,22 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     setState(() { _loading = true; _error = null; });
 
     try {
+      _preferences = await PlaybackPreferences.load();
+      final oldHistory = await PlaybackStore.find(widget.url);
+      if (resume == null) _resume = oldHistory?.position ?? Duration.zero;
+
       final result = _result ?? await VkService.resolve(widget.url);
       final qualities = result.qualities;
       if (qualities.isEmpty) throw Exception('Нет доступного потока');
-      final selected = quality ?? _quality ?? _bestQuality(qualities);
+
+      final selected = quality ?? _quality ?? _preferredQuality(qualities);
       final url = qualities[selected] ?? qualities.values.first;
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
       final start = resume ?? _resume;
       if (start > Duration.zero && start < controller.value.duration) await controller.seekTo(start);
       await controller.setPlaybackSpeed(_speedValue);
-      await controller.play();
+      if (_preferences.autoplay) await controller.play();
       if (!mounted) { await controller.dispose(); return; }
       setState(() { _result = result; _controller = controller; _quality = selected; _loading = false; });
       controller.addListener(_refresh);
@@ -62,9 +69,11 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     }
   }
 
-  Future<void> _prepareResume() async {
-    final item = await PlaybackStore.find(widget.url);
-    _resume = item?.position ?? Duration.zero;
+  String _preferredQuality(Map<String, String> qualities) {
+    if (_preferences.defaultQuality != 'Авто' && qualities.containsKey(_preferences.defaultQuality)) {
+      return _preferences.defaultQuality;
+    }
+    return _bestQuality(qualities);
   }
 
   String _bestQuality(Map<String, String> qualities) {
@@ -176,7 +185,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
       const Icon(Icons.error_outline_rounded, color: Colors.white54, size: 48),
       const SizedBox(height: 12), Text('$_error', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
-      const SizedBox(height: 18), OutlinedButton.icon(onPressed: () async { await _prepareResume(); _load(); }, icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
+      const SizedBox(height: 18), OutlinedButton.icon(onPressed: () => _load(), icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
     ])));
     final c = _controller;
     if (c == null || !c.value.isInitialized) return const SizedBox.shrink();
