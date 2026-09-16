@@ -19,10 +19,37 @@ class _HomeScreenState extends State<HomeScreen> {
   int _bottom = 0;
 
   void _open() {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-    final screen = VkService.isVkUrl(url) ? VkPlayerScreen(url: url) : PlayerScreen(url: url);
+    final prepared = _prepareUrl(_urlController.text);
+    if (prepared == null) {
+      _showMessage('Введите корректную ссылку http:// или https://');
+      return;
+    }
+
+    final screen = VkService.isVkUrl(prepared)
+        ? VkPlayerScreen(url: prepared)
+        : PlayerScreen(url: prepared);
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  }
+
+  String? _prepareUrl(String raw) {
+    var value = raw.trim();
+    if (value.isEmpty) return null;
+
+    // Convenient for pasted domains such as youtube.com/... or vk.com/....
+    if (!value.contains('://')) value = 'https://$value';
+
+    final uri = Uri.tryParse(value);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https') || uri.host.isEmpty) {
+      return null;
+    }
+    return uri.toString();
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message), behavior: SnackBarBehavior.floating));
   }
 
   @override
@@ -86,6 +113,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: TextField(
                                 controller: _urlController,
                                 onSubmitted: (_) => _open(),
+                                keyboardType: TextInputType.url,
+                                textInputAction: TextInputAction.go,
                                 decoration: const InputDecoration(hintText: 'Вставьте ссылку на видео', border: InputBorder.none),
                               ),
                             ),
