@@ -4,7 +4,7 @@
     <application
         android:label="KUZAT"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@android:drawable/ic_media_play"
         android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
