@@ -20,9 +20,11 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   VideoPlayerController? _controller;
   VkVideoResult? _result;
   Timer? _saveTimer;
+  Timer? _controlsTimer;
   bool _loading = true;
   String? _error;
   bool _fullscreen = false;
+  bool _controlsVisible = true;
   double _speedValue = 1;
   String? _quality;
   Duration _resume = Duration.zero;
@@ -36,11 +38,16 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
 
   Future<void> _load({String? quality, Duration? resume}) async {
     _saveTimer?.cancel();
+    _controlsTimer?.cancel();
     final old = _controller;
     _controller = null;
     await old?.dispose();
     if (!mounted) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+      _controlsVisible = true;
+    });
 
     try {
       _preferences = await PlaybackPreferences.load();
@@ -59,13 +66,25 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
       if (start > Duration.zero && start < controller.value.duration) await controller.seekTo(start);
       await controller.setPlaybackSpeed(_speedValue);
       if (_preferences.autoplay) await controller.play();
-      if (!mounted) { await controller.dispose(); return; }
-      setState(() { _result = result; _controller = controller; _quality = selected; _loading = false; });
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _result = result;
+        _controller = controller;
+        _quality = selected;
+        _loading = false;
+      });
       controller.addListener(_refresh);
       _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _saveProgress());
+      _scheduleControlsHide();
     } catch (_) {
       if (!mounted) return;
-      setState(() { _error = 'Не удалось открыть VK Video. Проверьте ссылку или доступность видео.'; _loading = false; });
+      setState(() {
+        _error = 'Не удалось открыть VK Video. Проверьте ссылку или доступность видео.';
+        _loading = false;
+      });
     }
   }
 
@@ -82,7 +101,45 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   }
 
   void _refresh() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (_controller?.value.isPlaying == true && _controlsVisible) _scheduleControlsHide();
+  }
+
+  void _scheduleControlsHide() {
+    _controlsTimer?.cancel();
+    if (_controller?.value.isPlaying != true) return;
+    _controlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _controller?.value.isPlaying == true) setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _showControls() {
+    if (!mounted) return;
+    setState(() => _controlsVisible = true);
+    _scheduleControlsHide();
+  }
+
+  void _toggleControls() {
+    if (_controlsVisible) {
+      _controlsTimer?.cancel();
+      setState(() => _controlsVisible = false);
+    } else {
+      _showControls();
+    }
+  }
+
+  Future<void> _togglePlay() async {
+    final c = _controller;
+    if (c == null) return;
+    if (c.value.isPlaying) {
+      await c.pause();
+      _controlsTimer?.cancel();
+      if (mounted) setState(() => _controlsVisible = true);
+    } else {
+      await c.play();
+      _showControls();
+    }
   }
 
   Future<void> _saveProgress() async {
@@ -108,6 +165,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _controlsTimer?.cancel();
     unawaited(_saveProgress());
     _controller?.removeListener(_refresh);
     _controller?.dispose();
@@ -129,6 +187,7 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     } else {
       await _restoreSystemUi();
     }
+    _showControls();
   }
 
   Future<void> _seek(Duration delta) async {
@@ -139,11 +198,15 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     if (target < Duration.zero) target = Duration.zero;
     if (target > v.duration) target = v.duration;
     await c.seekTo(target);
+    _showControls();
   }
 
   Future<void> _changeQuality(String quality) async {
     final c = _controller;
-    if (c == null || quality == _quality) { if (mounted) Navigator.pop(context); return; }
+    if (c == null || quality == _quality) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
     final position = c.value.position;
     await _load(quality: quality, resume: position);
     if (mounted) Navigator.pop(context);
@@ -152,7 +215,11 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
   Future<void> _setSpeed(double value) async {
     _speedValue = value;
     await _controller?.setPlaybackSpeed(value);
-    if (mounted) { Navigator.pop(context); setState(() {}); }
+    if (mounted) {
+      Navigator.pop(context);
+      setState(() {});
+      _showControls();
+    }
   }
 
   String _time(Duration value) {
@@ -170,12 +237,11 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         title: Text(result?.title.isNotEmpty == true ? result!.title : 'VK Видео', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-        actions: [IconButton(onPressed: _showSpeed, icon: const Icon(Icons.speed_rounded)), IconButton(onPressed: _fullscreenToggle, icon: const Icon(Icons.fullscreen_rounded))],
       ),
       body: SafeArea(
         top: !_fullscreen,
         bottom: !_fullscreen,
-        child: Column(children: [Expanded(child: _buildVideo()), if (!_loading && _error == null && _controller != null) _controls()]),
+        child: _buildVideo(),
       ),
     );
   }
@@ -184,31 +250,62 @@ class _VkPlayerScreenState extends State<VkPlayerScreen> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) return Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
       const Icon(Icons.error_outline_rounded, color: Colors.white54, size: 48),
-      const SizedBox(height: 12), Text('$_error', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
-      const SizedBox(height: 18), OutlinedButton.icon(onPressed: () => _load(), icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
+      const SizedBox(height: 12),
+      Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+      const SizedBox(height: 18),
+      OutlinedButton.icon(onPressed: () => _load(), icon: const Icon(Icons.refresh_rounded), label: const Text('Повторить')),
     ])));
     final c = _controller;
     if (c == null || !c.value.isInitialized) return const SizedBox.shrink();
-    return Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: Stack(alignment: Alignment.center, children: [VideoPlayer(c), if (c.value.isBuffering) const CircularProgressIndicator()])));
+    return Center(
+      child: AspectRatio(
+        aspectRatio: c.value.aspectRatio,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _toggleControls,
+          child: Stack(children: [
+            Positioned.fill(child: VideoPlayer(c)),
+            if (c.value.isBuffering) const Center(child: CircularProgressIndicator()),
+            AnimatedOpacity(
+              opacity: _controlsVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: IgnorePointer(
+                ignoring: !_controlsVisible,
+                child: Stack(children: [
+                  Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withOpacity(.60), Colors.transparent, Colors.black.withOpacity(.72)], stops: const [0, .42, 1])))),
+                  Positioned(top: 10, left: 10, right: 10, child: Row(children: [
+                    Expanded(child: Text(_result?.title.isNotEmpty == true ? _result!.title : 'VK Видео', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700))),
+                    IconButton(onPressed: _fullscreenToggle, color: Colors.white, icon: Icon(_fullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded)),
+                  ])),
+                  Center(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    _roundButton(Icons.replay_10_rounded, () => _seek(const Duration(seconds: -10))),
+                    const SizedBox(width: 18),
+                    _roundButton(c.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, _togglePlay, large: true),
+                    const SizedBox(width: 18),
+                    _roundButton(Icons.forward_10_rounded, () => _seek(const Duration(seconds: 10))),
+                  ])),
+                  Positioned(left: 10, right: 10, bottom: 8, child: Column(children: [
+                    VideoProgressIndicator(c, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Color(0xFFFFC107), bufferedColor: Colors.white54, backgroundColor: Colors.white30), padding: const EdgeInsets.symmetric(vertical: 8)),
+                    Row(children: [
+                      Text('${_time(c.value.position)} / ${_time(c.value.duration)}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                      const Spacer(),
+                      IconButton(onPressed: () { c.setVolume(c.value.volume == 0 ? 1 : 0); _showControls(); }, color: Colors.white, icon: Icon(c.value.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
+                      Text('${_speedValue}x', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                      IconButton(onPressed: _showSpeed, color: Colors.white, icon: const Icon(Icons.speed_rounded)),
+                      IconButton(onPressed: _showQuality, color: Colors.white, icon: const Icon(Icons.high_quality_rounded)),
+                    ]),
+                  ])),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
-  Widget _controls() {
-    final c = _controller!;
-    final v = c.value;
-    return Material(color: const Color(0xFF0D0D0D), child: Padding(padding: const EdgeInsets.fromLTRB(12, 4, 12, 12), child: Column(children: [
-      VideoProgressIndicator(c, allowScrubbing: true, colors: const VideoProgressColors(playedColor: Color(0xFFFFC107), bufferedColor: Colors.white38, backgroundColor: Colors.white12), padding: const EdgeInsets.symmetric(vertical: 8)),
-      Row(children: [
-        IconButton(onPressed: () => _seek(const Duration(seconds: -10)), icon: const Icon(Icons.replay_10_rounded)),
-        IconButton(onPressed: () => v.isPlaying ? c.pause() : c.play(), icon: Icon(v.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded)),
-        IconButton(onPressed: () => _seek(const Duration(seconds: 10)), icon: const Icon(Icons.forward_10_rounded)),
-        Text('${_time(v.position)} / ${_time(v.duration)}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
-        const Spacer(),
-        IconButton(onPressed: () => c.setVolume(v.volume == 0 ? 1 : 0), icon: Icon(v.volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded)),
-        IconButton(onPressed: _showSpeed, icon: Text('${_speedValue}x', style: const TextStyle(fontSize: 12))),
-        IconButton(onPressed: _showQuality, icon: const Icon(Icons.high_quality_rounded)),
-        IconButton(onPressed: _fullscreenToggle, icon: const Icon(Icons.fullscreen_rounded)),
-      ]),
-    ])));
+  Widget _roundButton(IconData icon, VoidCallback onPressed, {bool large = false}) {
+    return Material(color: Colors.black.withOpacity(.45), shape: const CircleBorder(), child: InkWell(onTap: onPressed, customBorder: const CircleBorder(), child: Padding(padding: EdgeInsets.all(large ? 18 : 12), child: Icon(icon, color: Colors.white, size: large ? 34 : 25))));
   }
 
   void _showQuality() {
